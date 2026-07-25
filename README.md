@@ -108,12 +108,6 @@ your machine* doesn't get to sit there eating your machine to look cute.
   real ticker, so the speed is the speed.
 </sub></p>
 
-Past about 70% the boat stops tracking the water and starts getting thrown off
-the crests: the sea drops away faster than it can follow and for a few frames
-it's flying. That's a ballistic arc launched from the water's own vertical
-velocity, not a canned bounce — so the hops land where the wave actually threw
-it, and there are none at all on a calm sea.
-
 ## Two wordings
 
 Switchable live, from the panel. **simple** explains a port to somebody who

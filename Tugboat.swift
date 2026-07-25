@@ -1881,18 +1881,36 @@ enum BoatIcon {
     private static let swellSteps = 12
     private static var cache: [Int: NSImage] = [:]
 
+    /// How hard the boat gets thrown off the crests, 0…1 — and it is keyed off
+    /// CPU DIRECTLY rather than off `swell`, because swell saturates at 120%.
+    /// Everything from one pegged core to eight looks identical to the sea, so
+    /// there is no way to say "only when it's really bad" in swell's language.
+    /// This is the top of the range and nowhere else: nothing below 380%, full
+    /// at 600%.
+    static func hop(cpu: Double) -> Double {
+        min(1, max(0, (cpu - 380) / 220))
+    }
+
+    /// Quantised, because it joins the frame cache key — continuous would mean a
+    /// fresh bitmap every tick, which is the thing the cache exists to prevent.
+    private static let hopSteps = 4
+    static func hopLevel(for h: Double) -> Int {
+        Int((h * Double(hopSteps - 1)).rounded())
+    }
+
     /// The loop has to CLOSE or there's a visible jolt where it wraps. The two
     /// sine terms advance at rates 1 and 1.4, so the smallest phase span both
     /// come home on is 10π — 6π looks like it should work and leaves the second
     /// wave 0.8π out of place.
     private static let phaseSpan = 10 * Double.pi
 
-    static func frame(step: Int, level: Int) -> NSImage {
+    static func frame(step: Int, level: Int, hopLevel: Int = 0) -> NSImage {
         let s = ((step % phaseSteps) + phaseSteps) % phaseSteps
-        let key = level * phaseSteps + s
+        let key = (level * hopSteps + hopLevel) * phaseSteps + s
         if let hit = cache[key] { return hit }
         let img = image(phase: Double(s) / Double(phaseSteps) * phaseSpan,
-                        swell: Double(level) / Double(swellSteps - 1))
+                        swell: Double(level) / Double(swellSteps - 1),
+                        hop: Double(hopLevel) / Double(hopSteps - 1))
         cache[key] = img
         return img
     }
@@ -1900,10 +1918,11 @@ enum BoatIcon {
     /// The same quantised frame the menubar would show, drawn at any resolution.
     /// Uncached on purpose — this is for export, and caching 8x bitmaps would
     /// hold megabytes for something that runs once.
-    static func renderFrame(step: Int, level: Int, scale: Double) -> NSImage {
+    static func renderFrame(step: Int, level: Int, hopLevel: Int, scale: Double) -> NSImage {
         let s = ((step % phaseSteps) + phaseSteps) % phaseSteps
         return image(phase: Double(s) / Double(phaseSteps) * phaseSpan,
                      swell: Double(level) / Double(swellSteps - 1),
+                     hop: Double(hopLevel) / Double(hopSteps - 1),
                      scale: scale)
     }
 
@@ -1917,7 +1936,8 @@ enum BoatIcon {
     /// producing a 22pt bitmap for something else to upscale — every path is
     /// stroked at the target resolution, so an 8x frame is crisp curves and not
     /// fat pixels. The menubar always draws at 1.
-    static func image(phase: Double, swell s: Double, scale: Double = 1) -> NSImage {
+    static func image(phase: Double, swell s: Double, hop hopGain: Double = 0,
+                      scale: Double = 1) -> NSImage {
         let img = NSImage(size: NSSize(width: size.width * scale,
                                        height: size.height * scale))
         img.lockFocus()
@@ -1966,16 +1986,16 @@ enum BoatIcon {
         var lift = (surface(Double(cx)) - base) * 0.70
         let slope = surface(Double(cx) + 2) - surface(Double(cx) - 2)
 
-        // AIRBORNE. Past ~70% swell the boat stops tracking the water and starts
-        // getting thrown off the crests — the sea drops out from under it faster
-        // than it can follow, and for a few frames it's flying.
+        // AIRBORNE. Only at the very top of the range (see `hop(cpu:)`): the boat
+        // stops tracking the water and starts getting thrown off the crests — the
+        // sea drops out from under it faster than it can follow, and for a few
+        // frames it's flying.
         //
         // Modelled rather than faked, and stateless because frames are cached by
-        // (step, level) and can be asked for in any order: look back over a short
+        // (step, level, hop) and can be asked for in any order: look back over a short
         // window, launch a ballistic arc from each past instant using the water's
         // own vertical velocity there, and take whichever is highest now. A boat
         // that was flung hard two frames ago is still above the trough it left.
-        let hopGain = max(0, (s - 0.70) / 0.30)
         if hopGain > 0 {
             let dp = phaseSpan / Double(phaseSteps)   // one tick of phase
             let g = 0.52                              // tuned so hops need a real crest
@@ -2073,11 +2093,15 @@ final class BoatAnimator {
     /// Position in the cached loop, kept as a Double so speed can vary smoothly
     /// even though the frames themselves are a fixed set.
     private var pos: Double = 0
-    private var lastKey = (-1, -1)
+    private var lastKey = (-1, -1, -1)
     /// Eased toward the real figure rather than set to it, so a spike doesn't
     /// snap the sea from flat to violent in one frame.
     private var swell: Double = 0
     private var target: Double = 0
+    /// Eased separately from swell — it has its own threshold far up the range,
+    /// so it must not inherit swell's saturation at 120%.
+    private var hop: Double = 0
+    private var hopTarget: Double = 0
 
     /// 12fps, not 60. This is an app about not wasting the machine's resources —
     /// an icon that burns a core to show you that nothing is burning a core
@@ -2096,10 +2120,14 @@ final class BoatAnimator {
         tick()
     }
 
-    func report(cpu: Double) { target = BoatIcon.swell(cpu: cpu) }
+    func report(cpu: Double) {
+        target = BoatIcon.swell(cpu: cpu)
+        hopTarget = BoatIcon.hop(cpu: cpu)
+    }
 
     private func tick() {
         swell += (target - swell) * 0.08
+        hop += (hopTarget - hop) * 0.08
         // Calm water still moves, just slowly — a dead-still sea looks like a
         // frozen app rather than an idle machine. Busy water moves about three
         // times faster, which carries as much of the reading as the amplitude
@@ -2117,11 +2145,12 @@ final class BoatAnimator {
         pos += 0.18 + swell * 1.6
         let step = Int(pos) % BoatIcon.phaseSteps
         let level = BoatIcon.level(for: swell)
+        let hopLevel = BoatIcon.hopLevel(for: hop)
         // Assigning the same image again still makes AppKit redraw the status
         // item, so don't. At rest this makes most ticks free.
-        guard (step, level) != lastKey else { return }
-        lastKey = (step, level)
-        button?.image = BoatIcon.frame(step: step, level: level)
+        guard (step, level, hopLevel) != lastKey else { return }
+        lastKey = (step, level, hopLevel)
+        button?.image = BoatIcon.frame(step: step, level: level, hopLevel: hopLevel)
     }
 
     deinit { timer?.invalidate() }
@@ -2299,7 +2328,8 @@ if let i = CommandLine.arguments.firstIndex(of: "--icon"),
     for (n, cpu) in [0.0, 15, 60, 200, 600].enumerated() {
         let s = BoatIcon.swell(cpu: cpu)
         for f in 0..<6 {
-            let src = BoatIcon.image(phase: Double(f) * 0.55, swell: s)
+            let src = BoatIcon.image(phase: Double(f) * 0.55, swell: s,
+                                     hop: BoatIcon.hop(cpu: cpu))
             let big = NSImage(size: NSSize(width: BoatIcon.size.width * scale,
                                            height: BoatIcon.size.height * scale))
             big.lockFocus()
@@ -2337,18 +2367,24 @@ if let i = CommandLine.arguments.firstIndex(of: "--icon-anim"),
     try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
 
     let fps = 12.0, holdTicks = 36, scale: CGFloat = 8
-    var swell = 0.0, pos = 0.0, n = 0
+    var swell = 0.0, hop = 0.0, pos = 0.0, n = 0
     // Start settled rather than easing up from flat, so the first segment shows
     // its own sea and not the ramp into it.
-    if let first = loads.first { swell = BoatIcon.swell(cpu: first) }
+    if let first = loads.first {
+        swell = BoatIcon.swell(cpu: first)
+        hop = BoatIcon.hop(cpu: first)
+    }
 
     for cpu in loads {
         let target = BoatIcon.swell(cpu: cpu)
+        let hopT = BoatIcon.hop(cpu: cpu)
         for _ in 0..<holdTicks {
-            swell += (target - swell) * 0.08            // same easing as StatusIcon
+            swell += (target - swell) * 0.08            // same easing as BoatAnimator
+            hop += (hopT - hop) * 0.08
             pos += 0.18 + swell * 1.6                   // same phase advance
             let src = BoatIcon.renderFrame(step: Int(pos) % BoatIcon.phaseSteps,
                                            level: BoatIcon.level(for: swell),
+                                           hopLevel: BoatIcon.hopLevel(for: hop),
                                            scale: Double(scale))
             let w = BoatIcon.size.width * scale, h = BoatIcon.size.height * scale
             let big = NSImage(size: NSSize(width: w, height: h + 34))
