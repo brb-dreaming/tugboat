@@ -1854,7 +1854,9 @@ final class KeyablePanel: NSPanel {
 // for the highlighted state. Nothing in here picks a colour.
 
 enum BoatIcon {
-    static let size = NSSize(width: 20, height: 16)
+    /// Bigger than the filled version needed. Outline art costs you a pixel of
+    /// stroke on every edge, so the shape inside has to be given it back.
+    static let size = NSSize(width: 22, height: 18)
 
     /// How rough the sea is, 0…1. Not linear in CPU: the interesting range is
     /// the bottom of it. Going from nothing to one busy process is the change
@@ -1915,25 +1917,17 @@ enum BoatIcon {
             + sin(x / 1.7 - phase * 1.4) * amp * 0.4
         }
 
-        let sea = NSBezierPath()
-        sea.move(to: NSPoint(x: 0, y: 0))
-        for x in stride(from: 0.0, through: Double(w), by: 0.5) {
-            sea.line(to: NSPoint(x: x, y: surface(x)))
-        }
-        sea.line(to: NSPoint(x: w, y: 0))
-        sea.close()
-        ink.withAlphaComponent(0.28).setFill()
-        sea.fill()
-
-        // The waterline itself, drawn solid on top — the fill alone reads as a
-        // grey blob at this size, the line is what makes it a surface.
+        // Her logo is line art, so the sea is a LINE, not a filled mass. The
+        // filled version read as a grey block with a boat on it; hers reads as
+        // a boat on a squiggle, which is the whole charm of the thing.
         let crest = NSBezierPath()
         crest.move(to: NSPoint(x: 0, y: surface(0)))
         for x in stride(from: 0.0, through: Double(w), by: 0.5) {
             crest.line(to: NSPoint(x: x, y: surface(x)))
         }
-        crest.lineWidth = 1
-        ink.withAlphaComponent(0.85).setStroke()
+        crest.lineWidth = 1.1
+        crest.lineCapStyle = .round
+        ink.setStroke()
         crest.stroke()
 
         // The boat sits ON the water it's floating on: its height and its tilt
@@ -1956,21 +1950,51 @@ enum BoatIcon {
         t.rotate(byRadians: CGFloat(tilt))
         t.concat()
 
-        // Hull: a stubby trapezoid, wider at the deck than the keel. A tugboat's
-        // silhouette is nearly all hull and one tall wheelhouse — at 20px the
-        // proportions are the only thing that survives, so they have to be right.
-        let hull = NSBezierPath()
-        hull.move(to: NSPoint(x: -5.4, y: 0))
-        hull.line(to: NSPoint(x: 5.0, y: 0))
-        hull.line(to: NSPoint(x: 3.6, y: -3.0))
-        hull.line(to: NSPoint(x: -4.0, y: -3.0))
-        hull.close()
-        ink.setFill()
-        hull.fill()
+        // Traced from her logo, not invented: bow high and rounded on the LEFT,
+        // hull curving down to a flat keel, stern stepping up on the right.
+        // Outline, because hers is outline — a filled silhouette at this size is
+        // a different drawing wearing the same shape.
+        //
+        // Everything is knocked out to transparent first (`.clear` fill with
+        // .copy) so the sea line doesn't show through the hull. That's what
+        // makes the boat sit ON the water instead of the water running through
+        // it, and it's the one thing outline art needs that filled art doesn't.
+        ink.setStroke()
 
-        // Wheelhouse, set aft of centre, and the funnel above it.
-        NSBezierPath(rect: NSRect(x: -2.6, y: 0, width: 3.6, height: 3.2)).fill()
-        NSBezierPath(rect: NSRect(x: 1.6, y: 0, width: 1.8, height: 4.4)).fill()
+        let hull = NSBezierPath()
+        hull.move(to: NSPoint(x: -6.2, y: 3.4))
+        hull.curve(to: NSPoint(x: -3.6, y: -2.2),
+                   controlPoint1: NSPoint(x: -6.4, y: 0.4),
+                   controlPoint2: NSPoint(x: -5.6, y: -1.8))
+        hull.line(to: NSPoint(x: 3.4, y: -2.2))
+        hull.curve(to: NSPoint(x: 5.6, y: 1.0),
+                   controlPoint1: NSPoint(x: 4.8, y: -2.0),
+                   controlPoint2: NSPoint(x: 5.6, y: -0.6))
+        hull.line(to: NSPoint(x: 6.4, y: 1.0))
+        hull.line(to: NSPoint(x: 6.4, y: 2.0))
+        hull.line(to: NSPoint(x: -6.2, y: 2.0))
+        hull.close()
+        NSColor.clear.setFill()
+        NSGraphicsContext.current?.compositingOperation = .copy
+        hull.fill()
+        NSGraphicsContext.current?.compositingOperation = .sourceOver
+        hull.lineWidth = 1.1
+        hull.lineJoinStyle = .round
+        hull.stroke()
+
+        // Wheelhouse and funnel. Same knock-out trick, same order as hers:
+        // house forward of the stack, stack tall and slightly proud of it.
+        for r in [NSRect(x: -2.8, y: 2.0, width: 4.0, height: 3.4),
+                  NSRect(x: 1.4, y: 2.0, width: 2.0, height: 4.8)] {
+            let p = NSBezierPath(roundedRect: r, xRadius: 0.5, yRadius: 0.5)
+            NSColor.clear.setFill()
+            NSGraphicsContext.current?.compositingOperation = .copy
+            p.fill()
+            NSGraphicsContext.current?.compositingOperation = .sourceOver
+            p.lineWidth = 1.1
+            p.lineJoinStyle = .round
+            p.stroke()
+        }
 
         NSGraphicsContext.restoreGraphicsState()
 
