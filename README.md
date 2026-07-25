@@ -92,11 +92,11 @@ there's something to say — an app whose whole argument is *here's what's eatin
 your machine* doesn't get to sit there eating your machine to look cute.
 
 <p align="center">
-  <img src="assets/demo-icon.gif" width="200" alt="The sea at 0%, 25%, 90%, 260% and 600% CPU">
+  <img src="assets/demo-icon.gif" width="200" alt="The sea at 0%, 25%, 60%, 90% and 200% CPU">
 </p>
 
 <p align="center"><sub>
-  The same icon at 0%, 25%, 90%, 260% and 600% CPU — rendered by replaying the
+  The same icon at 0%, 25%, 60%, 90% and 200% CPU — rendered by replaying the
   real ticker, so the speed is the speed.
 </sub></p>
 
