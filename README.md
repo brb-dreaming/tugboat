@@ -15,15 +15,13 @@
 
 ---
 
+## Know what's on every port
+
+Tugboat reports on every process so that you know what's running and what it is.
+
 <p align="center">
   <img src="assets/demo-panel.gif" width="340" alt="The panel: groups expanding, a row re-asking itself, a kill button asking for a second click">
 </p>
-
-## Know what's on every port
-
-Tugboat reports on every process so that you know what's running and what it is. 
-
-{VIDEO HERE INSTEAD!!}
 
 ## How it works
 
