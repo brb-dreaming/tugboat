@@ -77,9 +77,6 @@ Tugboat reads no environment variables at all. (If you happen to have
 
 ### Headless
 
-A running SwiftUI app can't be screenshotted from a shell, so the two things
-worth verifying have their own doors:
-
 ```sh
 ./Tugboat --scan --describe --group    # print what the menubar would show
 ./Tugboat --icon /tmp/boat             # dump icon frames to PNG at 8x, at
