@@ -75,6 +75,13 @@ process says about itself. There is **no API key to set and no config file**;
 Tugboat reads no environment variables at all. (If you happen to have
 `ANTHROPIC_API_KEY` exported, the CLI will use it, and descriptions bill there.)
 
+**What leaves your machine.** To identify a port, Tugboat sends the model the
+port number, the process name, its argv, its working directory, the
+`package.json` name and the git origin URL. That's enough to include private
+repo names and local paths. It goes through your own `claude` CLI, once per
+process, and the answer is cached so it isn't re-sent. Nothing else — no
+connection data, no file contents, no telemetry to anyone.
+
 ### Headless
 
 ```sh
