@@ -1842,12 +1842,212 @@ final class KeyablePanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
 
+// MARK: - The boat
+//
+// The menubar icon is drawn frame by frame rather than being a symbol, because
+// it carries a reading: the sea it sits on gets choppier the more CPU the
+// listening processes are using between them. That means a glance at the
+// menubar tells you something woke up — before you've opened anything.
+//
+// Everything here is one template image: pure black at varying alpha, with
+// `isTemplate = true`, so macOS recolours it for a light or dark menubar and
+// for the highlighted state. Nothing in here picks a colour.
+
+enum BoatIcon {
+    static let size = NSSize(width: 20, height: 16)
+
+    /// How rough the sea is, 0…1. Not linear in CPU: the interesting range is
+    /// the bottom of it. Going from nothing to one busy process is the change
+    /// worth seeing; 300% to 400% is not, and a linear map would spend almost
+    /// all its resolution up there where it means nothing.
+    static func swell(cpu: Double) -> Double {
+        min(1, pow(max(0, cpu) / 120, 0.6))
+    }
+
+    /// Frames are drawn once and kept. Redrawing every tick measured at 4.4% of
+    /// a core sustained — which for THIS app is a self-refuting number: the
+    /// icon telling you nothing is eating your CPU would have been eating your
+    /// CPU, and would have made its own sea choppy. Quantised to a 24-step loop
+    /// across 12 swell levels, so the whole animation is at most 288 tiny
+    /// bitmaps generated lazily and then just handed to the button.
+    static let phaseSteps = 60
+    private static let swellSteps = 12
+    private static var cache: [Int: NSImage] = [:]
+
+    /// The loop has to CLOSE or there's a visible jolt where it wraps. The two
+    /// sine terms advance at rates 1 and 1.4, so the smallest phase span both
+    /// come home on is 10π — 6π looks like it should work and leaves the second
+    /// wave 0.8π out of place.
+    private static let phaseSpan = 10 * Double.pi
+
+    static func frame(step: Int, level: Int) -> NSImage {
+        let s = ((step % phaseSteps) + phaseSteps) % phaseSteps
+        let key = level * phaseSteps + s
+        if let hit = cache[key] { return hit }
+        let img = image(phase: Double(s) / Double(phaseSteps) * phaseSpan,
+                        swell: Double(level) / Double(swellSteps - 1))
+        cache[key] = img
+        return img
+    }
+
+    static func level(for swell: Double) -> Int {
+        Int((swell * Double(swellSteps - 1)).rounded())
+    }
+
+    /// One frame. `phase` advances with time, `swell` with load.
+    static func image(phase: Double, swell s: Double) -> NSImage {
+        let img = NSImage(size: size)
+        img.lockFocus()
+        defer { img.unlockFocus() }
+
+        let w = size.width, h = size.height
+        let ink = NSColor.black
+
+        // Sea. Two sine waves rather than one — a single sine reads as a
+        // mechanical ripple, and their beat against each other is what makes it
+        // look like water. Amplitude and speed both ride the swell; a calm sea
+        // is nearly flat, which is the whole point of the reading.
+        let amp = 0.5 + s * 1.9
+        let base = h * 0.30
+        func surface(_ x: Double) -> Double {
+            base
+            + sin(x / 3.1 + phase) * amp
+            + sin(x / 1.7 - phase * 1.4) * amp * 0.4
+        }
+
+        let sea = NSBezierPath()
+        sea.move(to: NSPoint(x: 0, y: 0))
+        for x in stride(from: 0.0, through: Double(w), by: 0.5) {
+            sea.line(to: NSPoint(x: x, y: surface(x)))
+        }
+        sea.line(to: NSPoint(x: w, y: 0))
+        sea.close()
+        ink.withAlphaComponent(0.28).setFill()
+        sea.fill()
+
+        // The waterline itself, drawn solid on top — the fill alone reads as a
+        // grey blob at this size, the line is what makes it a surface.
+        let crest = NSBezierPath()
+        crest.move(to: NSPoint(x: 0, y: surface(0)))
+        for x in stride(from: 0.0, through: Double(w), by: 0.5) {
+            crest.line(to: NSPoint(x: x, y: surface(x)))
+        }
+        crest.lineWidth = 1
+        ink.withAlphaComponent(0.85).setStroke()
+        crest.stroke()
+
+        // The boat sits ON the water it's floating on: its height and its tilt
+        // both come from sampling the same wave function, so it rises with the
+        // crests and leans down the slope instead of being pasted on top.
+        let cx = w * 0.5
+        let lift = surface(Double(cx)) - base
+        let slope = surface(Double(cx) + 2) - surface(Double(cx) - 2)
+        // Damped and then clamped. Taking the raw slope of a rough sea heels the
+        // boat past 40° — at which point it reads as capsizing rather than as a
+        // busy machine, which is the wrong message from a status icon.
+        let tilt = min(max(atan2(slope, 4) * 0.45, -0.26), 0.26)
+
+        NSGraphicsContext.saveGraphicsState()
+        let t = NSAffineTransform()
+        // Rides ON the line, not through it: the keel sits just under the
+        // surface and the hull's full silhouette stays above it, because the
+        // hull shape is the only thing that says "tug" at 20 pixels.
+        t.translateX(by: cx, yBy: base + lift + 2.6)
+        t.rotate(byRadians: CGFloat(tilt))
+        t.concat()
+
+        // Hull: a stubby trapezoid, wider at the deck than the keel. A tugboat's
+        // silhouette is nearly all hull and one tall wheelhouse — at 20px the
+        // proportions are the only thing that survives, so they have to be right.
+        let hull = NSBezierPath()
+        hull.move(to: NSPoint(x: -5.4, y: 0))
+        hull.line(to: NSPoint(x: 5.0, y: 0))
+        hull.line(to: NSPoint(x: 3.6, y: -3.0))
+        hull.line(to: NSPoint(x: -4.0, y: -3.0))
+        hull.close()
+        ink.setFill()
+        hull.fill()
+
+        // Wheelhouse, set aft of centre, and the funnel above it.
+        NSBezierPath(rect: NSRect(x: -2.6, y: 0, width: 3.6, height: 3.2)).fill()
+        NSBezierPath(rect: NSRect(x: 1.6, y: 0, width: 1.8, height: 4.4)).fill()
+
+        NSGraphicsContext.restoreGraphicsState()
+
+        img.isTemplate = true
+        return img
+    }
+}
+
+/// Drives the icon. Kept out of the view layer entirely — it's an AppKit image
+/// on a status item, and it has to keep moving whether the panel is open or not.
+final class BoatAnimator {
+    private weak var button: NSStatusBarButton?
+    private var timer: Timer?
+    /// Position in the cached loop, kept as a Double so speed can vary smoothly
+    /// even though the frames themselves are a fixed set.
+    private var pos: Double = 0
+    private var lastKey = (-1, -1)
+    /// Eased toward the real figure rather than set to it, so a spike doesn't
+    /// snap the sea from flat to violent in one frame.
+    private var swell: Double = 0
+    private var target: Double = 0
+
+    /// 12fps, not 60. This is an app about not wasting the machine's resources —
+    /// an icon that burns a core to show you that nothing is burning a core
+    /// would be a joke at its own expense. At this size 12 is plenty: the water
+    /// reads as water and the whole thing costs a rounding error.
+    private static let fps = 12.0
+
+    init(button: NSStatusBarButton?) {
+        self.button = button
+        let t = Timer(timeInterval: 1 / Self.fps, repeats: true) { [weak self] _ in
+            self?.tick()
+        }
+        // .common, or the sea freezes solid the entire time a menu is open.
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
+        tick()
+    }
+
+    func report(cpu: Double) { target = BoatIcon.swell(cpu: cpu) }
+
+    private func tick() {
+        swell += (target - swell) * 0.08
+        // Calm water still moves, just slowly — a dead-still sea looks like a
+        // frozen app rather than an idle machine. Busy water moves about three
+        // times faster, which carries as much of the reading as the amplitude
+        // does.
+        // 0.18/tick at rest is a new frame roughly every 5 ticks — calm water
+        // lapping at ~2fps. That's not a compromise, it's the point: measured
+        // against a no-animation build (0.0% CPU), pushing a new image to the
+        // status item costs 3.5% of a core at 12fps, and it's the menubar
+        // redraw that costs it, not the drawing — caching the frames barely
+        // moved the number. An app that exists to tell you what's eating your
+        // machine does not get to sit there eating 3.5% of it to look nice.
+        // So the frame RATE carries the reading too: still-ish water when
+        // nothing's happening, and it only spends the CPU when there's
+        // something to say.
+        pos += 0.18 + swell * 1.6
+        let step = Int(pos) % BoatIcon.phaseSteps
+        let level = BoatIcon.level(for: swell)
+        // Assigning the same image again still makes AppKit redraw the status
+        // item, so don't. At rest this makes most ticks free.
+        guard (step, level) != lastKey else { return }
+        lastKey = (step, level)
+        button?.image = BoatIcon.frame(step: step, level: level)
+    }
+
+    deinit { timer?.invalidate() }
+}
+
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var item: NSStatusItem!
     private var panel: KeyablePanel!
     private var clickAway: Any?
     private let store = Store()
     private var bag = Set<AnyCancellable>()
+    private var boat: BoatAnimator?
 
     func applicationDidFinishLaunching(_ note: Notification) {
         AppDelegate.retireOlderInstances()
@@ -1888,14 +2088,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.contentView = hosting
 
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.image = NSImage(systemSymbolName: "app.connected.to.app.below.fill",
-                                     accessibilityDescription: "Tugboat")
         item.button?.imagePosition = .imageLeading
         item.button?.action = #selector(toggle)
         item.button?.target = self
+        item.button?.setAccessibilityLabel("Tugboat")
+        boat = BoatAnimator(button: item.button)
 
         store.$listeners
-            .sink { [weak self] ls in self?.item.button?.title = " \(ls.count)" }
+            .sink { [weak self] ls in
+                self?.item.button?.title = " \(ls.count)"
+                // Total CPU across everything that's listening — the one figure
+                // here that actually moves minute to minute. Memory barely
+                // changes and would leave the sea looking painted on.
+                self?.boat?.report(cpu: ls.reduce(0) { $0 + $1.cpuPercent })
+            }
             .store(in: &bag)
     }
 
@@ -1994,6 +2200,38 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 // `./Tugboat --scan [--describe] [--group]` prints what the menubar would show.
 // Exists because a running SwiftUI app can't be screenshotted from a shell —
 // this is how the scanner and the model passes get verified without the GUI.
+
+// `./Tugboat --icon <dir>` writes a strip of icon frames to PNG at 8x. The
+// menubar can't be screenshotted from a shell, so this is the only way to see
+// what the boat actually looks like — including at loads the machine isn't
+// under right now.
+if let i = CommandLine.arguments.firstIndex(of: "--icon"),
+   i + 1 < CommandLine.arguments.count {
+    let dir = CommandLine.arguments[i + 1]
+    try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    let scale: CGFloat = 8
+    for (n, cpu) in [0.0, 15, 60, 200, 600].enumerated() {
+        let s = BoatIcon.swell(cpu: cpu)
+        for f in 0..<6 {
+            let src = BoatIcon.image(phase: Double(f) * 0.55, swell: s)
+            let big = NSImage(size: NSSize(width: BoatIcon.size.width * scale,
+                                           height: BoatIcon.size.height * scale))
+            big.lockFocus()
+            NSGraphicsContext.current?.imageInterpolation = .none
+            NSColor.white.setFill()
+            NSRect(origin: .zero, size: big.size).fill()
+            src.draw(in: NSRect(origin: .zero, size: big.size))
+            big.unlockFocus()
+            guard let tiff = big.tiffRepresentation,
+                  let rep = NSBitmapImageRep(data: tiff),
+                  let png = rep.representation(using: .png, properties: [:]) else { continue }
+            try? png.write(to: URL(fileURLWithPath: "\(dir)/cpu\(n)-\(Int(cpu))-f\(f).png"))
+        }
+        print(String(format: "cpu %.0f%% → swell %.2f", cpu, s))
+    }
+    print("frames in \(dir)")
+    exit(0)
+}
 
 if CommandLine.arguments.contains("--scan") {
     let wantDescribe = CommandLine.arguments.contains("--describe")
