@@ -157,15 +157,16 @@ then `launchctl load ~/Library/LaunchAgents/com.brb.tugboat.plist`. `KeepAlive`
 stays false on purpose — if the user quits the boat, it should stay quit.
 
 **Cleanup:** `launchctl unload` the plist if you wrote one, delete
-`~/.claude/ports-cache-v2.json` and `~/.claude/ports-groups.json`, remove the
+`~/Library/Application Support/Tugboat/`, remove the
 clone. Nothing else on the machine is touched.
 
 </details>
 
 ## Notes
 
-- Cache lives at `~/.claude/ports-cache-v2.json` (descriptions) and
-  `~/.claude/ports-groups.json` (grouping). Delete either to force a re-ask.
+- Cache lives in `~/Library/Application Support/Tugboat/` —
+  `ports-cache-v2.json` (descriptions) and `ports-groups.json` (grouping).
+  Delete either to force a re-ask. Nothing is written anywhere else.
 - Model calls run `--strict-mcp-config --no-session-persistence`: one answer, no
   MCP servers booted, no transcript per description. A default `claude -p` is a
   whole interactive session in miniature, and one per port makes a menubar

@@ -314,6 +314,32 @@ enum AppIcons {
     }
 }
 
+// MARK: - Where state lives
+
+/// Tugboat's own folder under Application Support, which is the only directory
+/// on the machine it owns. Earlier builds wrote the caches into `~/.claude` —
+/// that is Claude Code's config folder, somebody else's namespace, and a user
+/// clearing it for Claude Code reasons would silently wipe every description
+/// Tugboat had already paid a model call for.
+enum Support {
+    static let dir = URL(fileURLWithPath: NSHomeDirectory()
+                         + "/Library/Application Support/Tugboat")
+
+    /// Carries a cache over from the old `~/.claude` location the first time it
+    /// is asked for, so upgrading doesn't throw away answers already bought.
+    /// Never overwrites: if the new file exists, the new file is the truth.
+    static func url(_ name: String) -> URL {
+        let fm = FileManager.default
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let new = dir.appendingPathComponent(name)
+        let old = URL(fileURLWithPath: NSHomeDirectory() + "/.claude/" + name)
+        if !fm.fileExists(atPath: new.path), fm.fileExists(atPath: old.path) {
+            try? fm.moveItem(at: old, to: new)
+        }
+        return new
+    }
+}
+
 // MARK: - Claude CLI
 
 /// Descriptions go through the already-authenticated `claude` CLI rather than a
@@ -414,7 +440,7 @@ final class Describer: ObservableObject {
     @Published var voice: Voice = .current
 
     private let queue = DispatchQueue(label: "ports.describe")
-    private let cacheURL = URL(fileURLWithPath: NSHomeDirectory() + "/.claude/ports-cache-v2.json")
+    private let cacheURL = Support.url("ports-cache-v2.json")
 
     init() {
         if let data = try? Data(contentsOf: cacheURL),
@@ -555,7 +581,7 @@ final class Grouper: ObservableObject {
     /// no matter how much the port set thrashes.
     private static let minInterval: TimeInterval = 120
     private let queue = DispatchQueue(label: "ports.group")
-    private let cacheURL = URL(fileURLWithPath: NSHomeDirectory() + "/.claude/ports-groups.json")
+    private let cacheURL = Support.url("ports-groups.json")
 
     init() {
         if let data = try? Data(contentsOf: cacheURL),
