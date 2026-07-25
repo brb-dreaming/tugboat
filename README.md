@@ -20,7 +20,7 @@
 Tugboat reports on every process so that you know what's running and what it is.
 
 <p align="center">
-  <img src="assets/demo-panel.gif" width="340" alt="The panel: groups expanding, a row re-asking itself, a kill button asking for a second click">
+  <img src="assets/demo-panel.gif" width="380" alt="The panel: groups expanding, a row re-asking itself, a kill button asking for a second click">
 </p>
 
 ## How it works
