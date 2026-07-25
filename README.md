@@ -99,11 +99,14 @@ seeing; 300% → 400% isn't. Calm water laps at about 2fps and only speeds up wh
 there's something to say — an app whose whole argument is *here's what's eating
 your machine* doesn't get to sit there eating your machine to look cute.
 
-<!-- DEMO: drop demo-icon.gif into assets/ and uncomment.
 <p align="center">
-  <img src="assets/demo-icon.gif" width="300" alt="The sea under load">
+  <img src="assets/demo-icon.gif" width="264" alt="The sea at 0%, 25%, 90%, 260% and 600% CPU">
 </p>
--->
+
+<p align="center"><sub>
+  The same icon at 0%, 25%, 90%, 260% and 600% CPU — rendered by replaying the
+  real ticker, so the speed is the speed.
+</sub></p>
 
 ## Two wordings
 
@@ -150,6 +153,9 @@ worth verifying have their own doors:
 ./Tugboat --scan --describe --group    # print what the menubar would show
 ./Tugboat --icon /tmp/boat             # dump icon frames to PNG at 8x, at
                                        # loads your machine isn't under
+./Tugboat --icon-anim /tmp/boat 0,90,600
+                                       # one PNG per tick of the real 12fps
+                                       # ticker — the only way to see the SPEED
 ```
 
 `--simple` / `--technical` override the saved wording for one run.

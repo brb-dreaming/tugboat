@@ -2257,6 +2257,64 @@ if let i = CommandLine.arguments.firstIndex(of: "--icon"),
     exit(0)
 }
 
+// `./Tugboat --icon-anim <dir> [cpu,cpu,…]` writes one PNG per TICK of the real
+// 12fps ticker while CPU is held at each value in turn. The point is that the
+// static `--icon` strip can only show amplitude, and half the reading is SPEED
+// — a calm sea advances a phase step every ~5 ticks and a rough one advances
+// nearly two per tick. Replaying the actual loop (same easing, same pos step,
+// same quantisation) is the only honest way to see that; duplicated frames are
+// the slowness, so the output must be played back at a flat 12fps.
+if let i = CommandLine.arguments.firstIndex(of: "--icon-anim"),
+   i + 1 < CommandLine.arguments.count {
+    let dir = CommandLine.arguments[i + 1]
+    let loads: [Double] = {
+        guard i + 2 < CommandLine.arguments.count,
+              !CommandLine.arguments[i + 2].hasPrefix("-") else { return [0, 25, 90, 260, 600] }
+        return CommandLine.arguments[i + 2].split(separator: ",").compactMap { Double($0) }
+    }()
+    try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+
+    let fps = 12.0, holdTicks = 36, scale: CGFloat = 8
+    var swell = 0.0, pos = 0.0, n = 0
+    // Start settled rather than easing up from flat, so the first segment shows
+    // its own sea and not the ramp into it.
+    if let first = loads.first { swell = BoatIcon.swell(cpu: first) }
+
+    for cpu in loads {
+        let target = BoatIcon.swell(cpu: cpu)
+        for _ in 0..<holdTicks {
+            swell += (target - swell) * 0.08            // same easing as StatusIcon
+            pos += 0.18 + swell * 1.6                   // same phase advance
+            let src = BoatIcon.frame(step: Int(pos) % BoatIcon.phaseSteps,
+                                     level: BoatIcon.level(for: swell))
+            let w = BoatIcon.size.width * scale, h = BoatIcon.size.height * scale
+            let big = NSImage(size: NSSize(width: w, height: h + 34))
+            big.lockFocus()
+            NSGraphicsContext.current?.imageInterpolation = .none
+            NSColor.white.setFill()
+            NSRect(origin: .zero, size: big.size).fill()
+            src.draw(in: NSRect(x: 0, y: 34, width: w, height: h))
+            let label = String(format: "%.0f%% CPU", cpu) as NSString
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.monospacedSystemFont(ofSize: 20, weight: .medium),
+                .foregroundColor: NSColor(white: 0.45, alpha: 1)
+            ]
+            let sz = label.size(withAttributes: attrs)
+            label.draw(at: NSPoint(x: (w - sz.width) / 2, y: 7), withAttributes: attrs)
+            big.unlockFocus()
+            if let tiff = big.tiffRepresentation,
+               let rep = NSBitmapImageRep(data: tiff),
+               let png = rep.representation(using: .png, properties: [:]) {
+                try? png.write(to: URL(fileURLWithPath: String(format: "%@/f%04d.png", dir, n)))
+            }
+            n += 1
+        }
+        print(String(format: "cpu %.0f%% → swell %.2f", cpu, swell))
+    }
+    print("\(n) frames in \(dir) — play back at \(Int(fps))fps")
+    exit(0)
+}
+
 if CommandLine.arguments.contains("--scan") {
     let wantDescribe = CommandLine.arguments.contains("--describe")
     let wantGroup = CommandLine.arguments.contains("--group")
