@@ -100,13 +100,19 @@ there's something to say — an app whose whole argument is *here's what's eatin
 your machine* doesn't get to sit there eating your machine to look cute.
 
 <p align="center">
-  <img src="assets/demo-icon.gif" width="264" alt="The sea at 0%, 25%, 90%, 260% and 600% CPU">
+  <img src="assets/demo-icon.gif" width="200" alt="The sea at 0%, 25%, 90%, 260% and 600% CPU">
 </p>
 
 <p align="center"><sub>
   The same icon at 0%, 25%, 90%, 260% and 600% CPU — rendered by replaying the
   real ticker, so the speed is the speed.
 </sub></p>
+
+Past about 70% the boat stops tracking the water and starts getting thrown off
+the crests: the sea drops away faster than it can follow and for a few frames
+it's flying. That's a ballistic arc launched from the water's own vertical
+velocity, not a canned bounce — so the hops land where the wave actually threw
+it, and there are none at all on a calm sea.
 
 ## Two wordings
 

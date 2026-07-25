@@ -1856,7 +1856,12 @@ final class KeyablePanel: NSPanel {
 enum BoatIcon {
     /// Bigger than the filled version needed. Outline art costs you a pixel of
     /// stroke on every edge, so the shape inside has to be given it back.
-    static let size = NSSize(width: 22, height: 18)
+    /// 21 tall, not 18. The extra 3pt is headroom the hop needs: at full swell
+    /// the boat was already grazing the top of an 18pt box before it started
+    /// leaving the water, and a status icon that crops its own funnel reads as a
+    /// rendering bug rather than as a busy machine. Still well inside the
+    /// menubar's height.
+    static let size = NSSize(width: 22, height: 21)
 
     /// How rough the sea is, 0…1. Not linear in CPU: the interesting range is
     /// the bottom of it. Going from nothing to one busy process is the change
@@ -1892,15 +1897,36 @@ enum BoatIcon {
         return img
     }
 
+    /// The same quantised frame the menubar would show, drawn at any resolution.
+    /// Uncached on purpose — this is for export, and caching 8x bitmaps would
+    /// hold megabytes for something that runs once.
+    static func renderFrame(step: Int, level: Int, scale: Double) -> NSImage {
+        let s = ((step % phaseSteps) + phaseSteps) % phaseSteps
+        return image(phase: Double(s) / Double(phaseSteps) * phaseSpan,
+                     swell: Double(level) / Double(swellSteps - 1),
+                     scale: scale)
+    }
+
     static func level(for swell: Double) -> Int {
         Int((swell * Double(swellSteps - 1)).rounded())
     }
 
     /// One frame. `phase` advances with time, `swell` with load.
-    static func image(phase: Double, swell s: Double) -> NSImage {
-        let img = NSImage(size: size)
+    ///
+    /// `scale` re-renders the whole drawing at a larger size rather than
+    /// producing a 22pt bitmap for something else to upscale — every path is
+    /// stroked at the target resolution, so an 8x frame is crisp curves and not
+    /// fat pixels. The menubar always draws at 1.
+    static func image(phase: Double, swell s: Double, scale: Double = 1) -> NSImage {
+        let img = NSImage(size: NSSize(width: size.width * scale,
+                                       height: size.height * scale))
         img.lockFocus()
         defer { img.unlockFocus() }
+        if scale != 1 {
+            let up = NSAffineTransform()
+            up.scale(by: CGFloat(scale))
+            up.concat()
+        }
 
         let w = size.width, h = size.height
         let ink = NSColor.black
@@ -1910,7 +1936,7 @@ enum BoatIcon {
         // look like water. Amplitude and speed both ride the swell; a calm sea
         // is nearly flat, which is the whole point of the reading.
         let amp = 0.5 + s * 1.9
-        let base = h * 0.30
+        let base = h * 0.26
         func surface(_ x: Double) -> Double {
             base
             + sin(x / 3.1 + phase) * amp
@@ -1934,8 +1960,44 @@ enum BoatIcon {
         // both come from sampling the same wave function, so it rises with the
         // crests and leans down the slope instead of being pasted on top.
         let cx = w * 0.5
-        let lift = surface(Double(cx)) - base
+        // Damped: a hull has LENGTH, so it averages the water under it rather
+        // than tracking a single point's peaks. Also what keeps the boat inside
+        // its own box at full swell.
+        var lift = (surface(Double(cx)) - base) * 0.70
         let slope = surface(Double(cx) + 2) - surface(Double(cx) - 2)
+
+        // AIRBORNE. Past ~70% swell the boat stops tracking the water and starts
+        // getting thrown off the crests — the sea drops out from under it faster
+        // than it can follow, and for a few frames it's flying.
+        //
+        // Modelled rather than faked, and stateless because frames are cached by
+        // (step, level) and can be asked for in any order: look back over a short
+        // window, launch a ballistic arc from each past instant using the water's
+        // own vertical velocity there, and take whichever is highest now. A boat
+        // that was flung hard two frames ago is still above the trough it left.
+        let hopGain = max(0, (s - 0.70) / 0.30)
+        if hopGain > 0 {
+            let dp = phaseSpan / Double(phaseSteps)   // one tick of phase
+            let g = 0.52                              // tuned so hops need a real crest
+            func height(_ ph: Double) -> Double {
+                base
+                + sin(Double(cx) / 3.1 + ph) * amp
+                + sin(Double(cx) / 1.7 - ph * 1.4) * amp * 0.4
+            }
+            var best = height(phase)
+            for k in 1...4 {
+                let past = phase - Double(k) * dp
+                let v0 = height(past) - height(past - dp)   // upward water speed then
+                guard v0 > 0 else { continue }
+                let t = Double(k)
+                best = max(best, height(past) + v0 * t - 0.5 * g * t * t)
+            }
+            // Clamped, and the clamp is not a taste call: the icon is 18pt tall
+            // and a boat that flies out of its own box gets cropped by the
+            // menubar. Blended in by hopGain so the calm sea is untouched and it
+            // doesn't start hopping the instant the threshold is crossed.
+            lift += min(best - height(phase), 2.4) * hopGain
+        }
         // Damped and then clamped. Taking the raw slope of a rough sea heels the
         // boat past 40° — at which point it reads as capsizing rather than as a
         // busy machine, which is the wrong message from a status icon.
@@ -2285,12 +2347,12 @@ if let i = CommandLine.arguments.firstIndex(of: "--icon-anim"),
         for _ in 0..<holdTicks {
             swell += (target - swell) * 0.08            // same easing as StatusIcon
             pos += 0.18 + swell * 1.6                   // same phase advance
-            let src = BoatIcon.frame(step: Int(pos) % BoatIcon.phaseSteps,
-                                     level: BoatIcon.level(for: swell))
+            let src = BoatIcon.renderFrame(step: Int(pos) % BoatIcon.phaseSteps,
+                                           level: BoatIcon.level(for: swell),
+                                           scale: Double(scale))
             let w = BoatIcon.size.width * scale, h = BoatIcon.size.height * scale
             let big = NSImage(size: NSSize(width: w, height: h + 34))
             big.lockFocus()
-            NSGraphicsContext.current?.imageInterpolation = .none
             NSColor.white.setFill()
             NSRect(origin: .zero, size: big.size).fill()
             src.draw(in: NSRect(x: 0, y: 34, width: w, height: h))
