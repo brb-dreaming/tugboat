@@ -17,11 +17,9 @@
 
 ---
 
-<!-- DEMO: drop demo-panel.gif into assets/ and uncomment.
 <p align="center">
-  <img src="assets/demo-panel.gif" width="420" alt="The panel">
+  <img src="assets/demo-panel.gif" width="340" alt="The panel: groups expanding, a row re-asking itself, a kill button asking for a second click">
 </p>
--->
 
 ## The problem
 
@@ -75,12 +73,6 @@ can.
 
 **Act.** Open in browser, re-ask what something is, or quit it. Nothing is ever
 killed without a second click.
-
-<!-- DEMO: drop demo-reask.gif into assets/ and uncomment.
-<p align="center">
-  <img src="assets/demo-reask.gif" width="420" alt="Re-asking a row">
-</p>
--->
 
 ## The icon knows before you do
 
