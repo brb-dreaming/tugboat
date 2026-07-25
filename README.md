@@ -91,6 +91,73 @@ worth verifying have their own doors:
 
 `--simple` / `--technical` override the saved wording for one run.
 
+<details>
+<summary><b>Setting this up for someone (agent instructions)</b></summary>
+
+<br>
+
+If you are an agent installing Tugboat on a user's Mac, follow this in order.
+Read the whole block before you start.
+
+**1. Build.**
+
+```sh
+git clone https://github.com/brb-dreaming/tugboat ~/tugboat
+cd ~/tugboat && ./build.sh
+```
+
+`build.sh` is the only supported invocation. A bare `swiftc Tugboat.swift`
+fails — it needs `-framework Cocoa -framework SwiftUI -framework Combine`.
+Expect warnings about Sendable closure captures; those are not errors, and the
+build succeeded if the last line is `built: …/Tugboat`.
+
+**2. Verify before launching, not after.**
+
+```sh
+./Tugboat --scan --describe --group
+```
+
+This is the whole pipeline printed to stdout. It is the only way you can check
+your own work: Tugboat is a menubar app with no window, so **it will not appear
+in a screenshot and `screencapture` will silently grab whatever is frontmost
+instead**. Do not report success on the basis of a screenshot. If `--scan`
+prints a port table with descriptions, it works.
+
+**3. Check the description path specifically.** In the `--scan` output, each row
+ends in a confidence marker like `[high]`. If every row instead reads as bare
+process names with no English sentence, the `claude` CLI is missing from PATH or
+not signed in — run `claude -p hello` as the user and fix that first. The app
+still runs without it; it just degrades to what the process says about itself.
+
+**4. Configure nothing.** There is no config file, no API key, and Tugboat reads
+no environment variables. If you find yourself writing a `.env`, you have
+misread the setup.
+
+**5. Launch.** `./Tugboat &` — a boat appears at the right end of the menubar.
+Click it for the panel.
+
+**6. Only if the user asked for launch-at-login**, write
+`~/Library/LaunchAgents/com.brb.tugboat.plist` with an absolute path to the
+built binary:
+
+```xml
+<dict>
+  <key>Label</key>            <string>com.brb.tugboat</string>
+  <key>ProgramArguments</key> <array><string>/Users/NAME/tugboat/Tugboat</string></array>
+  <key>RunAtLoad</key>        <true/>
+  <key>KeepAlive</key>        <false/>
+</dict>
+```
+
+then `launchctl load ~/Library/LaunchAgents/com.brb.tugboat.plist`. `KeepAlive`
+stays false on purpose — if the user quits the boat, it should stay quit.
+
+**Cleanup:** `launchctl unload` the plist if you wrote one, delete
+`~/.claude/ports-cache-v2.json` and `~/.claude/ports-groups.json`, remove the
+clone. Nothing else on the machine is touched.
+
+</details>
+
 ## Notes
 
 - Cache lives at `~/.claude/ports-cache-v2.json` (descriptions) and
