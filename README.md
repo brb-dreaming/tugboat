@@ -44,7 +44,23 @@ can.
 **Act.** Open in browser, re-ask what something is, or quit it. Nothing is ever
 killed without a second click.
 
-**Monitor.** The menubar icon responds to your CPU load.
+**Monitor.** The menubar icon responds to the whole laptop's CPU load,
+normalized to 0–100% across all cores. The panel shows the five busiest processes,
+including apps that have no listening ports. Their individual percentages are
+recent `ps` averages per core, so a multithreaded process can exceed 100%.
+Group memory and connection totals count each process once.
+
+**Reuse descriptions.** Port numbers are excluded from description identities.
+The same service reuses its answer across ports and restarts, while its full
+working directory and remaining command arguments distinguish separate projects.
+Old port-based cache entries stay readable and migrate when they do not name a port.
+
+**Quit carefully.** Tugboat checks the kernel process start time before sending
+SIGTERM and reports whether the process exited, is still running, or could not
+be verified. This reduces the risk from a reused PID, though the identity check
+and signal are separate system calls. The “forgotten?” badge is restricted to
+recognized development tools in your home folder with a confident safe-to-quit
+description, no connections, negligible CPU and at least two days of uptime.
 
 <p align="center">
   <img src="assets/demo-icon.gif" width="200" alt="The sea at 0%, 25%, 60%, 90% and 200% CPU">
@@ -62,25 +78,41 @@ No Xcode project. One file, one compiler invocation.
 git clone https://github.com/brb-dreaming/tugboat
 cd tugboat
 ./build.sh     # swiftc -O -o Tugboat Tugboat.swift
-./Tugboat
+open Tugboat.app
 ```
 
 **Requirements:** built and run on macOS 26, which gets the Liquid Glass
 surface. Below 26 that one surface falls back to a tinted panel and everything
 else is identical.
 
-**Descriptions** need the [`claude` CLI](https://claude.com/claude-code) on your
-PATH, signed in. Without it the app still runs — rows just fall back to what the
-process says about itself. There is **no API key to set and no config file**;
-Tugboat reads no environment variables at all. (If you happen to have
-`ANTHROPIC_API_KEY` exported, the CLI will use it, and descriptions bill there.)
+**Descriptions** use your signed-in Codex CLI with `gpt-6-luna` and low
+reasoning. Requests use brief instructions, run without session persistence,
+and skip user configuration, hooks, skills, MCP servers and shell tools.
+Descriptions remain cached per process. If Codex is unavailable, monitoring
+continues with the process's own name and metadata.
 
-**What leaves your machine.** To identify a port, Tugboat sends the model the
-port number, the process name, its argv, its working directory, the
+Install the Codex CLI and sign in with `codex login`. Tugboat uses your PATH
+plus common Homebrew, user-local and fnm locations so it can launch from Finder.
+No API key is required.
+
+**Launch from Finder.** `./build.sh` builds both the CLI and `Tugboat.app`.
+To install it, copy `Tugboat.app` into `~/Applications` or `/Applications`.
+Double-click it or find Tugboat in Spotlight. The boat lives in the menu bar and runs independently
+of Terminal.
+
+**What leaves your machine.** To identify a process, Tugboat sends the model the
+process name, its argv, its working directory, the
 `package.json` name and the git origin URL. That's enough to include private
-repo names and local paths. It goes through your own `claude` CLI, once per
-process, and the answer is cached so it isn't re-sent. Nothing else — no
-connection data, no file contents, no telemetry to anyone.
+repo names and local paths. It goes through your own `codex` CLI, once per
+process, and the answer is cached. The grouping pass additionally receives port
+numbers, descriptions, memory, uptime and current connection/CPU summaries.
+
+### Verify changes
+
+Run `./test.sh` for focused CPU, cache migration, duplicate totals, forgotten-label
+and process-identity regressions. The quit check creates and terminates only its
+own temporary `sleep` process. Then run `./Tugboat --scan --describe --group` to
+verify the live pipeline with your Codex login.
 
 ### Headless
 
@@ -129,15 +161,14 @@ prints a port table with descriptions, it works.
 
 **3. Check the description path specifically.** In the `--scan` output, each row
 ends in a confidence marker like `[high]`. If every row instead reads as bare
-process names with no English sentence, the `claude` CLI is missing from PATH or
-not signed in — run `claude -p hello` as the user and fix that first. The app
+process names with no English sentence, the Codex CLI is unavailable or not signed in. Check `codex login status`. The app
 still runs without it; it just degrades to what the process says about itself.
 
 **4. Configure nothing.** There is no config file, no API key, and Tugboat reads
 no environment variables. If you find yourself writing a `.env`, you have
 misread the setup.
 
-**5. Launch.** `./Tugboat &` — a boat appears at the right end of the menubar.
+**5. Launch.** `open Tugboat.app` — a boat appears at the right end of the menubar.
 Click it for the panel.
 
 **6. Only if the user asked for launch-at-login**, write
@@ -167,11 +198,7 @@ clone. Nothing else on the machine is touched.
 - Cache lives in `~/Library/Application Support/Tugboat/` —
   `ports-cache-v2.json` (descriptions) and `ports-groups.json` (grouping).
   Delete either to force a re-ask. Nothing is written anywhere else.
-- Model calls run `--strict-mcp-config --no-session-persistence`: one answer, no
-  MCP servers booted, no transcript per description. A default `claude -p` is a
-  whole interactive session in miniature, and one per port makes a menubar
-  utility the heaviest thing on the machine.
-- Sonnet first, Haiku if Sonnet is unreachable, and the row says which answered.
-  A model failure is never written to the cache as if it were an answer.
+- Model calls use `codex exec --ignore-user-config --ephemeral` with low
+  reasoning and brief task instructions. A failed description is not cached.
 - Grouping is forbidden from inventing abstract business names — groups are
   named after the app or repo they actually are.
