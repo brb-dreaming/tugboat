@@ -55,6 +55,40 @@ struct RegressionTests {
         reloaded.voice = .technical
         precondition(reloaded.desc(for: restarted) == dev, "Migrated descriptions must persist")
 
+        let started = DispatchSemaphore(value: 0)
+        let finish = DispatchSemaphore(value: 0)
+        var calls = 0
+        let reply = String(decoding: try JSONEncoder().encode(dev), as: UTF8.self)
+        let onDemand = Describer(cacheURL: folder.appendingPathComponent("on-demand.json")) { _ in
+            calls += 1
+            started.signal()
+            finish.wait()
+            return reply
+        }
+        onDemand.setActive(false)
+        onDemand.describe(first)
+        precondition(onDemand.pending.isEmpty, "A closed panel must not queue descriptions")
+        precondition(calls == 0)
+        onDemand.setActive(true)
+        onDemand.describe(first)
+        precondition(started.wait(timeout: .now() + 2) == .success)
+        onDemand.describe(sibling)
+        precondition(onDemand.isPending(sibling))
+        onDemand.setActive(false)
+        precondition(!onDemand.isPending(sibling), "Closing the panel must discard queued requests")
+        finish.signal()
+        pumpUntil { !onDemand.isPending(first) }
+        precondition(calls == 1, "Only the already-started request may finish after closing")
+        precondition(onDemand.desc(for: first) == dev)
+        onDemand.setActive(true)
+        onDemand.describe(first)
+        precondition(!onDemand.isPending(first), "Reopening must reuse the completed answer")
+        onDemand.describe(sibling)
+        precondition(started.wait(timeout: .now() + 2) == .success)
+        finish.signal()
+        pumpUntil { !onDemand.isPending(sibling) }
+        precondition(calls == 2, "Discarded requests must be available on the next open")
+
         let child = Process()
         child.executableURL = URL(fileURLWithPath: "/bin/sleep")
         child.arguments = ["30"]
@@ -73,6 +107,14 @@ struct RegressionTests {
         precondition(result.hasPrefix("Quit"))
         child.waitUntilExit()
         precondition(!child.isRunning, "A verified target must receive the quit request")
-        print("Passed CPU, process deduplication, cache migration, forgotten labels, and safe-quit regressions.")
+        print("Passed on-demand descriptions, CPU, process deduplication, cache migration, forgotten labels, and safe-quit regressions.")
+    }
+
+    static func pumpUntil(_ condition: () -> Bool) {
+        let deadline = Date().addingTimeInterval(3)
+        while !condition() && Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
+        precondition(condition(), "Timed out waiting for a description to commit")
     }
 }

@@ -32,7 +32,12 @@ pid, argv, cwd, memory, CPU and uptime, plus a live connection count.
 the actual evidence — `package.json` name, git remote, the argv, the working
 directory. 
 
-**Describe.** What's left goes to a model once, and the answer is cached to disk
+**Describe on demand.** The app scans locally at startup and while closed.
+Uncached descriptions and grouping are requested only while the menu bar panel
+is open. Closing the panel discards queued descriptions; one already-running
+request can finish and save its answer. Reopening reuses cached answers.
+
+What's left goes to a model once, and the answer is cached to disk
 against a *fingerprint of the process*, not the port... so a dev server that
 comes back on a different port is still recognised. You pay for each thing once,
 ever.
@@ -110,7 +115,7 @@ numbers, descriptions, memory, uptime and current connection/CPU summaries.
 ### Verify changes
 
 Run `./test.sh` for focused CPU, cache migration, duplicate totals, forgotten-label
-and process-identity regressions. The quit check creates and terminates only its
+process-identity and on-demand request regressions. The quit check creates and terminates only its
 own temporary `sleep` process. Then run `./Tugboat --scan --describe --group` to
 verify the live pipeline with your Codex login.
 

@@ -559,9 +559,15 @@ final class Describer: ObservableObject {
 
     private let queue = DispatchQueue(label: "ports.describe")
     private let cacheURL: URL
+    private let answer: (String) -> String?
+    private var active = true
+    private var queued: [String: (listener: Listener, voice: Voice)] = [:]
+    private var inFlight: String?
 
-    init(cacheURL: URL = Support.url("ports-cache-v2.json")) {
+    init(cacheURL: URL = Support.url("ports-cache-v2.json"),
+         answer: @escaping (String) -> String? = Codex.ask) {
         self.cacheURL = cacheURL
+        self.answer = answer
         if let data = try? Data(contentsOf: cacheURL),
            let decoded = try? JSONDecoder().decode([String: PortDesc].self, from: data) {
             cache = decoded
@@ -595,7 +601,19 @@ final class Describer: ObservableObject {
         listeners.reduce(into: [:]) { out, l in out[l.fingerprint] = desc(for: l) }
     }
 
+    /// Pausing discards work that has not started. The current request may
+    /// finish and cache its answer so reopening never pays for it twice.
+    func setActive(_ active: Bool) {
+        self.active = active
+        if !active {
+            pending.subtract(queued.keys)
+            queued.removeAll()
+        }
+        startNext()
+    }
+
     func describe(_ l: Listener) {
+        guard active else { return }
         let v = voice
         let key = key(l, v)
         if cache[key] != nil || pending.contains(key) { return }
@@ -607,17 +625,24 @@ final class Describer: ObservableObject {
         }
         pending.insert(key)
         failed.remove(key)
+        queued[key] = (l, v)
+        startNext()
+    }
+
+    private func startNext() {
+        guard active, inFlight == nil, let (key, request) = queued.first else { return }
+        queued.removeValue(forKey: key)
+        inFlight = key
         queue.async { [weak self] in
             guard let self else { return }
-            let answer = self.request(l, v)
+            let answer = self.request(request.listener, request.voice)
             DispatchQueue.main.async {
-                self.cache[key] = answer ?? self.fallback(l)
+                self.cache[key] = answer ?? self.fallback(request.listener)
                 self.pending.remove(key)
                 if answer == nil { self.failed.insert(key) }
-                // Only a real answer earns a place on disk. Caching a fallback
-                // would make one bad minute permanent: the port would never be
-                // asked about again, because `describe` skips anything cached.
                 if answer != nil { self.persist() }
+                self.inFlight = nil
+                self.startNext()
             }
         }
     }
@@ -675,7 +700,7 @@ final class Describer: ObservableObject {
 
     /// Failed requests remain visibly unavailable and are never cached.
     private func request(_ l: Listener, _ voice: Voice) -> PortDesc? {
-        decode(Codex.ask(prompt(l, voice)))
+        decode(answer(prompt(l, voice)))
     }
 
     private func decode(_ json: String?) -> PortDesc? {
@@ -845,9 +870,11 @@ final class Store: ObservableObject {
     let grouper = Grouper()
     private var timer: Timer?
     private var scanning = false
+    private var panelOpen = false
     private var bag = Set<AnyCancellable>()
 
     init() {
+        describer.setActive(false)
         // Republish so rows redraw when a description or grouping lands.
         describer.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &bag)
@@ -873,8 +900,10 @@ final class Store: ObservableObject {
                 self.cpu = cpu
                 self.listeners = found
                 self.lastScan = Date()
-                for l in found { self.describer.describe(l) }
-                self.grouper.group(found, descs: self.describer.snapshot(found))
+                if self.panelOpen {
+                    for l in found { self.describer.describe(l) }
+                    self.grouper.group(found, descs: self.describer.snapshot(found))
+                }
             }
         }
     }
@@ -896,7 +925,14 @@ final class Store: ObservableObject {
         }
     }
 
+    func setPanelOpen(_ open: Bool) {
+        panelOpen = open
+        describer.setActive(open)
+        if open { refresh() }
+    }
+
     func regroup() {
+        guard panelOpen else { return }
         grouper.group(listeners, descs: describer.snapshot(listeners), force: true)
     }
 
@@ -908,8 +944,10 @@ final class Store: ObservableObject {
         describer.voice = v
         grouper.voice = v
         UserDefaults.standard.set(v.rawValue, forKey: "voice")
-        for l in listeners { describer.describe(l) }
-        grouper.group(listeners, descs: describer.snapshot(listeners), force: true)
+        if panelOpen {
+            for l in listeners { describer.describe(l) }
+            grouper.group(listeners, descs: describer.snapshot(listeners), force: true)
+        }
     }
 
     func kill(_ l: Listener) { quit([l]) }
@@ -2449,6 +2487,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func closePanel() {
+        store.setPanelOpen(false)
         panel.orderOut(nil)
         if let clickAway { NSEvent.removeMonitor(clickAway) }
         clickAway = nil
@@ -2458,7 +2497,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if panel.isVisible {
             closePanel()
         } else {
-            store.refresh()
+            store.setPanelOpen(true)
             anchorUnderStatusItem()
             // Regardless: an accessory app isn't active, and ordering front the
             // ordinary way does nothing from a status-item click.
